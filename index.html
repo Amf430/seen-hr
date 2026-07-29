@@ -38,6 +38,7 @@ input,select,textarea{font-family:inherit;font-size:15px}
 .brand-mark{width:64px;height:64px;border-radius:16px;background:var(--maroon);color:#fff;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;margin:0 auto 16px}
 .login-card h1{font-size:22px;color:var(--maroon);margin-bottom:4px}
 .login-card p.sub{color:var(--muted);font-size:14px;margin-bottom:26px}
+.dev-credit{color:var(--muted);font-size:11px;text-align:center;margin-top:18px;opacity:.7}
 .field{text-align:right;margin-bottom:16px}
 .field label{display:block;font-size:13px;font-weight:500;color:var(--muted);margin-bottom:6px}
 .field input,.field select,.field textarea{width:100%;padding:12px 14px;border:1.5px solid var(--line);border-radius:11px;background:#fff;transition:border-color .15s}
@@ -194,6 +195,7 @@ tr:hover td{background:#fdfbf9}
     <button class="btn" id="loginBtn">تسجيل الدخول</button>
     <div class="err" id="loginErr"></div>
     <button class="btn link" id="resetBtn">نسيت كلمة المرور؟</button>
+    <div class="dev-credit">جميع الحقوق محفوظة — تطوير علاء فياض</div>
   </div>
 </div>
 
@@ -228,6 +230,7 @@ tr:hover td{background:#fdfbf9}
       <div class="who" id="sideName">—</div>
       <div class="role" id="sideRole">—</div>
       <button id="logoutBtn">تسجيل الخروج</button>
+      <div class="dev-credit" style="color:rgba(255,255,255,.45)">تطوير علاء فياض</div>
     </div>
   </aside>
 
@@ -301,6 +304,29 @@ function sortByCreated(arr){return arr.sort((a,b)=>{
   const ta=a.createdAt&&a.createdAt.toMillis?a.createdAt.toMillis():Date.now();
   const tb=b.createdAt&&b.createdAt.toMillis?b.createdAt.toMillis():Date.now();
   return tb-ta;});}
+
+/* ===== الدورة الشهرية: تبدأ يوم 26 وتنتهي يوم 25 من الشهر التالي ===== */
+const AR_MONTHS=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+function cycleOf(dateInput){
+  const d=(dateInput instanceof Date)?dateInput:new Date(dateInput);
+  let startY=d.getFullYear(), startM=d.getMonth();
+  if(d.getDate()<26){ startM-=1; if(startM<0){startM=11;startY-=1;} }
+  const start=new Date(startY,startM,26,0,0,0,0);
+  let endM=startM+1,endY=startY; if(endM>11){endM=0;endY+=1;}
+  const end=new Date(endY,endM,25,23,59,59,999);
+  const key=`${startY}-${String(startM+1).padStart(2,'0')}`;
+  const label=`26 ${AR_MONTHS[startM]} ← 25 ${AR_MONTHS[endM]} ${endY}`;
+  return {start,end,key,label,nextReset:new Date(endY,endM,26)};
+}
+/* تاريخ الحدث الفعلي للطلب (لا تاريخ التقديم): للاستئذان تاريخه، للإجازة تاريخ بدايتها */
+function reqEventDate(r){
+  const s=r.type==='permission'?r.date:r.startDate;
+  if(s) return new Date(s+'T00:00:00');
+  return (r.createdAt&&r.createdAt.toDate)?r.createdAt.toDate():new Date();
+}
+function requestsInCycle(cycle){
+  return CACHE_REQUESTS.filter(r=>{const d=reqEventDate(r);return d>=cycle.start&&d<=cycle.end;});
+}
 
 /* ========================================================================
    المصادقة
@@ -437,7 +463,8 @@ const NAV = {
     {id:'inbox',    ic:'📥', label:'الطلبات الواردة'},
     {id:'employees',ic:'👥', label:'الموظفون'},
     {id:'lists',    ic:'⚙️', label:'القوائم والأسباب'},
-    {id:'reports',  ic:'📈', label:'التقارير'},
+    {id:'monthly',  ic:'📅', label:'التقارير الشهرية'},
+    {id:'reports',  ic:'📈', label:'إحصائيات عامة'},
     {id:'audit',    ic:'🗂️', label:'سجل الحركات'},
   ]
 };
@@ -477,7 +504,7 @@ function subscribeData(){
     const q1=query(collection(db,'requests'));
     unsubReqs=onSnapshot(q1,snap=>{
       CACHE_REQUESTS=sortByCreated(snap.docs.map(d=>({id:d.id,...d.data()})));
-      updateBadges(); if(['home','inbox','reports','audit'].includes(currentPage)) render();
+      updateBadges(); if(['home','inbox','reports','audit','monthly'].includes(currentPage)) render();
     },err=>console.error('reqs',err));
     getDocs(query(collection(db,'users'))).then(s=>{CACHE_USERS=s.docs.map(d=>({id:d.id,...d.data()}));});
   }else{
@@ -502,15 +529,15 @@ function updateBadges(){
    ======================================================================== */
 function render(){
   const titles={home:ME.role==='admin'?'لوحة المعلومات':'الرئيسية',new:'طلب جديد',mine:'طلباتي',
-    inbox:'الطلبات الواردة',employees:'إدارة الموظفين',lists:'القوائم والأسباب',reports:'التقارير',audit:'سجل الحركات'};
+    inbox:'الطلبات الواردة',employees:'إدارة الموظفين',lists:'القوائم والأسباب',monthly:'التقارير الشهرية',reports:'إحصائيات عامة',audit:'سجل الحركات'};
   const hints={home:'',new:'اختر نوع الطلب واملأ البيانات',mine:'تابع حالة طلباتك',
     inbox:'راجع الطلبات ووافق أو ارفض',employees:'إضافة وتعديل وتعليق الحسابات',
-    lists:'أسباب الاستئذان وأنواع الإجازات وجهات الاعتماد',reports:'إحصائيات وتصدير Excel',audit:'من قام بماذا ومتى'};
+    lists:'أسباب الاستئذان وأنواع الإجازات وجهات الاعتماد',monthly:'دورة شهرية من 26 إلى 25 — تصدير Excel لكل دورة',reports:'إحصائيات وتصدير Excel',audit:'من قام بماذا ومتى'};
   $('#pageTitle').textContent=titles[currentPage]||'';
   $('#pageHint').textContent=hints[currentPage]||'';
   const v=$('#view'); v.innerHTML='';
   ({home:ME.role==='admin'?adminHome:empHome, new:pageNew, mine:pageMine,
-    inbox:pageInbox, employees:pageEmployees, lists:pageLists, reports:pageReports, audit:pageAudit
+    inbox:pageInbox, employees:pageEmployees, lists:pageLists, monthly:pageMonthly, reports:pageReports, audit:pageAudit
   }[currentPage]||empHome)(v);
 }
 
@@ -718,13 +745,37 @@ function pageMine(v){
 
 /* ---------- الأدمن: لوحة المعلومات ---------- */
 function adminHome(v){
-  const total=CACHE_REQUESTS.length;
-  const pend=CACHE_REQUESTS.filter(r=>r.status==='pending').length;
-  const appr=CACHE_REQUESTS.filter(r=>r.status==='approved').length;
-  const rej=CACHE_REQUESTS.filter(r=>r.status==='rejected').length;
+  const cyc=cycleOf(new Date());
+  const inCyc=requestsInCycle(cyc);
+  const banner=el('div','card','');
+  banner.style.cssText='background:var(--maroon);color:#fff;border:none';
+  banner.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <div><div style="font-size:13px;opacity:.8">الدورة الشهرية الحالية</div>
+      <div style="font-size:20px;font-weight:800;margin-top:2px">${cyc.label}</div></div>
+    <div style="text-align:left"><div style="font-size:13px;opacity:.8">يبدأ عدّ جديد تلقائياً في</div>
+      <div style="font-size:16px;font-weight:700">${fmtDate(cyc.nextReset)}</div></div></div>`;
+  v.appendChild(banner);
+
+  const total=inCyc.length;
+  const pend=inCyc.filter(r=>r.status==='pending').length;
+  const appr=inCyc.filter(r=>r.status==='approved').length;
+  const rej=inCyc.filter(r=>r.status==='rejected').length;
   const g=el('div','grid cols-4');
-  g.append(stat(total,'إجمالي الطلبات'),stat(pend,'تحت المراجعة','a'),stat(appr,'موافق عليها','g'),stat(rej,'مرفوضة','r'));
+  g.append(stat(total,'طلبات هذه الدورة'),stat(pend,'تحت المراجعة','a'),stat(appr,'موافق عليها','g'),stat(rej,'مرفوضة','r'));
   v.appendChild(g);
+
+  const g2=el('div','grid cols-2');
+  g2.append(stat(inCyc.filter(r=>r.type==='permission').length,'استئذانات الدورة'),
+            stat(inCyc.filter(r=>r.type==='leave').length,'إجازات الدورة'));
+  v.appendChild(g2);
+
+  const rc=el('div','card');
+  const rcHead=el('div','');rcHead.style.cssText='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px';
+  rcHead.appendChild(el('h3','','📅 تقرير هذه الدورة'));
+  const expBtn=el('button','btn sm','⬇️ تصدير Excel');expBtn.onclick=()=>monthlyExport(cyc);
+  rcHead.appendChild(expBtn);rc.appendChild(rcHead);
+  rc.appendChild(el('p','desc','للاطلاع على كل الدورات السابقة وتصديرها، افتح «التقارير الشهرية».'));
+  v.appendChild(rc);
 
   const pc=el('div','card'); pc.appendChild(el('h3','','📥 طلبات تنتظر مراجعتك'));
   const waiting=CACHE_REQUESTS.filter(r=>r.status==='pending');
@@ -967,6 +1018,102 @@ function chipCard(title,ic,key,fields,labels,renderItem,build){
     SETTINGS[key]=SETTINGS[key]||[];SETTINGS[key].push(build(vals));await saveSettings();draw();
     fields.forEach(f=>add.querySelector('#add_'+key+'_'+f).value='');toast('أُضيف','ok');};
   add.appendChild(btn);card.appendChild(add);return card;
+}
+
+/* ---------- الأدمن: التقارير الشهرية (26 → 25) ---------- */
+function pageMonthly(v){
+  const cur=cycleOf(new Date());
+  const map=new Map(); map.set(cur.key,cur);
+  CACHE_REQUESTS.forEach(r=>{const c=cycleOf(reqEventDate(r));map.set(c.key,c);});
+  const cycles=[...map.values()].sort((a,b)=>b.start-a.start);
+
+  const sel=el('div','card');
+  sel.appendChild(el('h3','','📅 اختر الدورة الشهرية'));
+  sel.appendChild(el('p','desc','كل دورة تبدأ يوم 26 وتنتهي يوم 25 من الشهر التالي. تُصنَّف الطلبات حسب تاريخ الاستئذان/بداية الإجازة.'));
+  const dd=el('select','');dd.style.cssText='width:100%;max-width:360px;padding:12px 14px;border:1.5px solid var(--line);border-radius:11px';
+  dd.innerHTML=cycles.map(c=>`<option value="${c.key}">${c.label}${c.key===cur.key?' (الحالية)':''}</option>`).join('');
+  sel.appendChild(dd);v.appendChild(sel);
+
+  const host=el('div','');v.appendChild(host);
+  const draw=()=>{
+    host.innerHTML='';
+    const cyc=cycles.find(c=>c.key===dd.value)||cur;
+    const list=requestsInCycle(cyc);
+    const perms=list.filter(r=>r.type==='permission');
+    const leaves=list.filter(r=>r.type==='leave');
+    const approvedDays=leaves.filter(r=>r.status==='approved').reduce((s,r)=>s+(r.days||0),0);
+
+    const g=el('div','grid cols-4');
+    g.append(stat(list.length,'إجمالي الطلبات'),stat(perms.length,'استئذانات'),
+             stat(leaves.length,'إجازات'),stat(approvedDays,'أيام إجازة معتمدة','g'));
+    host.appendChild(g);
+    const g2=el('div','grid cols-3');
+    g2.append(stat(list.filter(r=>r.status==='approved').length,'موافق عليها','g'),
+              stat(list.filter(r=>r.status==='rejected').length,'مرفوضة','r'),
+              stat(list.filter(r=>r.status==='pending').length,'تحت المراجعة','a'));
+    host.appendChild(g2);
+
+    const card=el('div','card');
+    const head=el('div','');head.style.cssText='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px';
+    head.appendChild(el('h3','',`تفاصيل الدورة — ${cyc.label}`));
+    const exp=el('button','btn sm','⬇️ تصدير Excel');exp.onclick=()=>monthlyExport(cyc);
+    head.appendChild(exp);card.appendChild(head);
+
+    if(!list.length) card.appendChild(el('div','empty','<div class="big">📭</div>لا توجد طلبات في هذه الدورة'));
+    else{
+      const wrap=el('div','table-wrap');
+      wrap.innerHTML=`<table><thead><tr><th>الموظف</th><th>النوع</th><th>التصنيف</th><th>التاريخ</th><th>الأيام</th><th>الحالة</th></tr></thead>
+        <tbody>${list.map(r=>`<tr>
+          <td><b>${esc(r.employeeName)}</b></td>
+          <td>${r.type==='permission'?'استئذان':'إجازة'}</td>
+          <td>${esc(r.categoryLabel)}</td>
+          <td>${r.type==='permission'?fmtDate(r.date):fmtDate(r.startDate)+' ← '+fmtDate(r.endDate)}</td>
+          <td>${r.type==='leave'?r.days:'—'}</td>
+          <td><span class="pill ${r.status}">${STATUS_AR[r.status]}</span></td></tr>`).join('')}</tbody></table>`;
+      card.appendChild(wrap);
+    }
+    host.appendChild(card);
+  };
+  dd.onchange=draw;draw();
+}
+
+function monthlyExport(cyc){
+  const list=requestsInCycle(cyc);
+  if(!list.length){toast('لا توجد طلبات في هذه الدورة','err');return;}
+  const perms=list.filter(r=>r.type==='permission');
+  const leaves=list.filter(r=>r.type==='leave');
+
+  const summary=[
+    {'البند':'الدورة','القيمة':cyc.label},
+    {'البند':'من تاريخ','القيمة':fmtDate(cyc.start)},
+    {'البند':'إلى تاريخ','القيمة':fmtDate(cyc.end)},
+    {'البند':'إجمالي الطلبات','القيمة':list.length},
+    {'البند':'عدد الاستئذانات','القيمة':perms.length},
+    {'البند':'عدد الإجازات','القيمة':leaves.length},
+    {'البند':'موافق عليها','القيمة':list.filter(r=>r.status==='approved').length},
+    {'البند':'مرفوضة','القيمة':list.filter(r=>r.status==='rejected').length},
+    {'البند':'تحت المراجعة','القيمة':list.filter(r=>r.status==='pending').length},
+    {'البند':'ملغية','القيمة':list.filter(r=>r.status==='cancelled').length},
+    {'البند':'أيام الإجازات المعتمدة','القيمة':leaves.filter(r=>r.status==='approved').reduce((s,r)=>s+(r.days||0),0)},
+    {'البند':'تاريخ التقرير','القيمة':fmtDate(new Date())},
+  ];
+  const permRows=perms.map(r=>({
+    'الموظف':r.employeeName,'الرقم الوظيفي':r.employeeEmpId||'','القسم':r.department||'',
+    'نوع الاستئذان':r.categoryLabel,'التاريخ':r.date,'الوقت':r.time,'السبب':r.reasonLabel||'',
+    'جهة الاعتماد':r.approverName||'','الحالة':STATUS_AR[r.status],'سبب الرفض':r.rejectReason||'','روجع بواسطة':r.reviewedBy||''
+  }));
+  const leaveRows=leaves.map(r=>({
+    'الموظف':r.employeeName,'الرقم الوظيفي':r.employeeEmpId||'','القسم':r.department||'',
+    'نوع الإجازة':r.categoryLabel,'من':r.startDate,'إلى':r.endDate,'عدد الأيام':r.days,
+    'جهة الاعتماد':r.approverName||'','الحالة':STATUS_AR[r.status],'سبب الرفض':r.rejectReason||'','روجع بواسطة':r.reviewedBy||''
+  }));
+
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summary),'ملخص الدورة');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(permRows.length?permRows:[{'لا يوجد':''}]),'الاستئذانات');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(leaveRows.length?leaveRows:[{'لا يوجد':''}]),'الإجازات');
+  XLSX.writeFile(wb,`تقرير_سين_${cyc.key}.xlsx`);
+  toast('تم تصدير التقرير الشهري','ok');
 }
 
 /* ---------- الأدمن: التقارير ---------- */
