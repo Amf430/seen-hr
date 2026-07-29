@@ -185,8 +185,8 @@ tr:hover td{background:#fdfbf9}
     <h1>سين العقارية</h1>
     <p class="sub">نظام الاستئذان والإجازات — الموارد البشرية</p>
     <div class="field">
-      <label>البريد الإلكتروني</label>
-      <input id="loginEmail" type="email" placeholder="name@seen.com" autocomplete="username" />
+      <label>رقم الجوال</label>
+      <input id="loginEmail" type="text" placeholder="05xxxxxxxx" autocomplete="username" />
     </div>
     <div class="field">
       <label>كلمة المرور</label>
@@ -331,10 +331,19 @@ function requestsInCycle(cycle){
 /* ========================================================================
    المصادقة
    ======================================================================== */
+/* يحوّل رقم الجوال لصيغة بريد داخلي يستخدمها Firebase (يبقى النظام مجانياً بالكامل).
+   لو أُدخل بريد حقيقي (يحتوي @) — مثل بريد المدير — يُستخدم كما هو. */
+function toLoginEmail(input){
+  const v=(input||'').trim();
+  if(v.includes('@')) return v.toLowerCase();
+  const digits=v.replace(/[^0-9]/g,'');
+  return digits+'@seen-hr.local';
+}
 $('#loginBtn').onclick = async ()=>{
-  const email=$('#loginEmail').value.trim(), pass=$('#loginPass').value;
+  const raw=$('#loginEmail').value.trim(), pass=$('#loginPass').value;
+  const email=toLoginEmail(raw);
   const err=$('#loginErr'); err.textContent='';
-  if(!email||!pass){err.textContent='أدخل البريد وكلمة المرور';return;}
+  if(!raw||!pass){err.textContent='أدخل رقم الجوال وكلمة المرور';return;}
   $('#loginBtn').disabled=true; $('#loginBtn').textContent='جارٍ الدخول…';
   try{ await signInWithEmailAndPassword(auth,email,pass); }
   catch(e){ err.textContent = authError(e.code); }
@@ -342,9 +351,10 @@ $('#loginBtn').onclick = async ()=>{
 };
 $('#loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')$('#loginBtn').click();});
 $('#resetBtn').onclick = async ()=>{
-  const email=$('#loginEmail').value.trim();
-  if(!email){$('#loginErr').textContent='اكتب بريدك أولاً ثم اضغط استعادة';return;}
-  try{await sendPasswordResetEmail(auth,email);toast('أُرسل رابط استعادة كلمة المرور إلى بريدك','ok');}
+  const raw=$('#loginEmail').value.trim();
+  if(!raw){$('#loginErr').textContent='اكتب رقم جوالك أولاً ثم اضغط استعادة';return;}
+  if(!raw.includes('@')){$('#loginErr').textContent='لإعادة تعيين كلمة المرور تواصل مع الأدمن، فهو يقدر يغيّرها لك مباشرة';return;}
+  try{await sendPasswordResetEmail(auth,raw);toast('أُرسل رابط استعادة كلمة المرور إلى بريدك','ok');}
   catch(e){$('#loginErr').textContent=authError(e.code);}
 };
 $('#logoutBtn').onclick = ()=>signOut(auth);
@@ -901,7 +911,7 @@ function openEmpForm(u=null){
       <div class="field"><label>المسمى الوظيفي</label><input id="eTitle" value="${esc(u?.jobTitle||'')}"></div>
     </div>
     <div class="form-row">
-      <div class="field"><label>الجوال</label><input id="ePhone" value="${esc(u?.phone||'')}"></div>
+      <div class="field"><label>الجوال (يُستخدم للدخول) *</label><input id="ePhone" value="${esc(u?.phone||'')}" placeholder="05xxxxxxxx"></div>
       <div class="field"><label>المدير المباشر</label><input id="eMgr" value="${esc(u?.manager||'')}"></div>
     </div>
     <div class="form-row">
@@ -912,10 +922,9 @@ function openEmpForm(u=null){
     </div>
     ${isEdit?'':`
     <div class="form-row">
-      <div class="field"><label>البريد الإلكتروني (للدخول) *</label><input id="eEmail" type="email"></div>
       <div class="field"><label>كلمة مرور مبدئية *</label><input id="ePass" type="text" placeholder="6 أحرف على الأقل"></div>
     </div>
-    <div class="help">سيُنشأ حساب دخول للموظف بهذا البريد وكلمة المرور. يمكنه تغييرها لاحقاً عبر "نسيت كلمة المرور".</div>`}
+    <div class="help">سيُنشأ حساب دخول للموظف برقم جواله وكلمة المرور هذي. يقدر يغيّرها أول ما يدخل، أو لاحقاً بمساعدة الأدمن.</div>`}
     <div class="row"><button class="btn ghost" id="eCancel">إلغاء</button><button class="btn" id="eSave">${isEdit?'حفظ التعديلات':'إنشاء الحساب'}</button></div>`);
   ov.appendChild(m);document.body.appendChild(ov);
   m.querySelector('#eCancel').onclick=()=>ov.remove();
@@ -933,8 +942,10 @@ function openEmpForm(u=null){
         await updateDoc(doc(db,'users',u.id),base);
         await logAction('تعديل موظف',name);toast('تم الحفظ','ok');
       }else{
-        const email=m.querySelector('#eEmail').value.trim(),pass=m.querySelector('#ePass').value;
-        if(!email||pass.length<6){toast('أدخل بريداً وكلمة مرور (6 أحرف)','err');btn.disabled=false;btn.textContent='إنشاء الحساب';return;}
+        const phoneDigits=base.phone.replace(/[^0-9]/g,'');
+        const pass=m.querySelector('#ePass').value;
+        if(!phoneDigits||pass.length<6){toast('أدخل رقم جوال صحيح وكلمة مرور (6 أحرف)','err');btn.disabled=false;btn.textContent='إنشاء الحساب';return;}
+        const email=phoneDigits+'@seen-hr.local';
         // إنشاء الحساب عبر تطبيق ثانوي حتى لا يُسجّل خروج الأدمن
         const secondary=initializeApp(firebaseConfig,'secondary_'+Date.now());
         const secAuth=getAuth(secondary);
@@ -943,13 +954,13 @@ function openEmpForm(u=null){
         await signOut(secAuth);
         const balances={};SETTINGS.leaveTypes.forEach(t=>{if(t.deduct)balances[t.id]=t.balance;});
         await setDoc(doc(db,'users',newUid),{...base,email,status:'active',balances,mustChangePassword:true,createdAt:serverTimestamp()});
-        await logAction('إضافة موظف',name+' ('+email+')');
+        await logAction('إضافة موظف',name+' ('+base.phone+')');
         toast('تم إنشاء الحساب','ok');
       }
       await refreshUsers();ov.remove();if(currentPage==='employees')render();
     }catch(e){
       console.error(e);
-      const map={'auth/email-already-in-use':'البريد مستخدم مسبقاً','auth/invalid-email':'صيغة البريد غير صحيحة','auth/weak-password':'كلمة المرور ضعيفة'};
+      const map={'auth/email-already-in-use':'رقم الجوال مستخدم مسبقاً','auth/invalid-email':'صيغة رقم الجوال غير صحيحة','auth/weak-password':'كلمة المرور ضعيفة'};
       toast(map[e.code]||'تعذّر الحفظ','err');btn.disabled=false;btn.textContent=isEdit?'حفظ التعديلات':'إنشاء الحساب';
     }
   };
