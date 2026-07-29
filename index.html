@@ -513,7 +513,8 @@ function subscribeData(){
   if(ME.role==='admin'){
     const q1=query(collection(db,'requests'));
     unsubReqs=onSnapshot(q1,snap=>{
-      CACHE_REQUESTS=sortByCreated(snap.docs.map(d=>({id:d.id,...d.data()})));
+      // الطلبات الملغاة تبقى خاصة بالموظف نفسه فقط، ولا تظهر عند الأدمن (سجلات/تقارير)
+      CACHE_REQUESTS=sortByCreated(snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.status!=='cancelled'));
       updateBadges(); if(['home','inbox','reports','audit','monthly'].includes(currentPage)) render();
     },err=>console.error('reqs',err));
     getDocs(query(collection(db,'users'))).then(s=>{CACHE_USERS=s.docs.map(d=>({id:d.id,...d.data()}));});
@@ -801,8 +802,7 @@ function pageInbox(v){
   filt.innerHTML=`
     <div class="field"><label>الحالة</label><select id="fStatus">
       <option value="pending">تحت المراجعة</option><option value="">الكل</option>
-      <option value="approved">موافق عليها</option><option value="rejected">مرفوضة</option>
-      <option value="cancelled">ملغية</option></select></div>
+      <option value="approved">موافق عليها</option><option value="rejected">مرفوضة</option></select></div>
     <div class="field"><label>النوع</label><select id="fType"><option value="">الكل</option>
       <option value="permission">استئذان</option><option value="leave">إجازة</option></select></div>
     <div class="field" style="flex:1"><label>بحث بالاسم</label><input id="fSearch" placeholder="اسم الموظف…"></div>`;
@@ -1104,7 +1104,6 @@ function monthlyExport(cyc){
     {'البند':'موافق عليها','القيمة':list.filter(r=>r.status==='approved').length},
     {'البند':'مرفوضة','القيمة':list.filter(r=>r.status==='rejected').length},
     {'البند':'تحت المراجعة','القيمة':list.filter(r=>r.status==='pending').length},
-    {'البند':'ملغية','القيمة':list.filter(r=>r.status==='cancelled').length},
     {'البند':'أيام الإجازات المعتمدة','القيمة':leaves.filter(r=>r.status==='approved').reduce((s,r)=>s+(r.days||0),0)},
     {'البند':'تاريخ التقرير','القيمة':fmtDate(new Date())},
   ];
