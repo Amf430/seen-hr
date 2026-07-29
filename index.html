@@ -287,6 +287,7 @@ let ME = null;               // بيانات المستخدم الحالي (Fire
 let SETTINGS = { permissionReasons:[], leaveTypes:[], approvers:[] };
 let currentPage = "home";
 let unsubReqs = null;
+let unsubMe = null;
 let CACHE_REQUESTS = [];      // للأدمن: كل الطلبات / للموظف: طلباته
 let CACHE_USERS = [];         // للأدمن فقط
 
@@ -373,7 +374,7 @@ function authError(code){
 
 onAuthStateChanged(auth, async (user)=>{
   $('#bootLoading').classList.add('hidden');
-  if(!user){ showLogin(); return; }
+  if(!user){ if(unsubReqs){unsubReqs();unsubReqs=null;} if(unsubMe){unsubMe();unsubMe=null;} showLogin(); return; }
   try{
     await loadMe(user);
     if(ME.status==='suspended'){
@@ -510,6 +511,15 @@ function go(page){
 /* اشتراك لحظي بالبيانات */
 function subscribeData(){
   if(unsubReqs) unsubReqs();
+  if(unsubMe) unsubMe();
+  // اشتراك لحظي على ملف المستخدم نفسه — يحدّث الرصيد فوراً عند خصمه أو إعادته دون الحاجة لتسجيل خروج
+  unsubMe = onSnapshot(doc(db,'users',ME.id), snap=>{
+    if(!snap.exists())return;
+    ME = {id:ME.id, ...snap.data()};
+    $('#sideName').textContent=ME.name;
+    $('#sideRole').textContent = ME.role==='admin' ? 'مدير النظام' : (ME.jobTitle||'موظف');
+    if(['home','new','mine'].includes(currentPage)) render();
+  },err=>console.error('me',err));
   if(ME.role==='admin'){
     const q1=query(collection(db,'requests'));
     unsubReqs=onSnapshot(q1,snap=>{
@@ -593,6 +603,10 @@ function requestCard(r,forAdmin){
     const ok=el('button','btn sm','✔ موافقة'); ok.onclick=()=>approve(r);
     const no=el('button','btn sm danger','✖ رفض'); no.onclick=()=>openReject(r);
     bar.append(ok,no); c.appendChild(bar);
+  }
+  if(forAdmin && r.status==='approved'){
+    const revoke=el('button','btn sm danger','↩ إلغاء الموافقة'); revoke.onclick=()=>openRevoke(r);
+    bar.append(revoke); c.appendChild(bar);
   }
   if(!forAdmin && r.status==='pending'){
     const cancel=el('button','btn sm ghost','إلغاء الطلب'); cancel.onclick=()=>withdraw(r);
@@ -855,6 +869,40 @@ function openReject(r){
       toast('تم رفض الطلب'); ov.remove();
     }catch(e){console.error(e);toast('تعذّر الرفض','err');}
   };
+}
+function openRevoke(r){
+  const ov=el('div','overlay');
+  const m=el('div','modal',`<h3>إلغاء الموافقة</h3>
+    <div class="help">سيتحول الطلب إلى «مرفوض»${r.type==='leave'&&r.deduct?'، ويُعاد عدد أيامه المخصومة فوراً لرصيد الموظف':''}.</div>
+    <div class="field"><label>سبب إلغاء الموافقة (يظهر للموظف) *</label><textarea id="rvReason" placeholder="اكتب سبب إلغاء الموافقة…"></textarea></div>
+    <div class="row"><button class="btn ghost" id="rvCancel">تراجع</button><button class="btn danger" id="rvOk">تأكيد إلغاء الموافقة</button></div>`);
+  ov.appendChild(m); document.body.appendChild(ov);
+  m.querySelector('#rvCancel').onclick=()=>ov.remove();
+  ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  m.querySelector('#rvOk').onclick=async()=>{
+    const reason=m.querySelector('#rvReason').value.trim();
+    if(!reason){toast('اكتب سبب إلغاء الموافقة','err');return;}
+    const btn=m.querySelector('#rvOk');btn.disabled=true;btn.textContent='جارٍ التنفيذ…';
+    try{ await revokeApproval(r,reason); ov.remove(); }
+    catch(e){console.error(e);toast('تعذّر إلغاء الموافقة','err');btn.disabled=false;btn.textContent='تأكيد إلغاء الموافقة';}
+  };
+}
+async function revokeApproval(r,reason){
+  // إعادة الرصيد المخصوم عند الموافقة (إن وُجد) قبل تغيير الحالة
+  if(r.type==='leave' && r.deduct && r.leaveTypeId){
+    const uref=doc(db,'users',r.employeeUid);
+    const usnap=await getDoc(uref);
+    if(usnap.exists()){
+      const u=usnap.data(); const bal={...(u.balances||{})};
+      const t=SETTINGS.leaveTypes.find(x=>x.id===r.leaveTypeId);
+      const cur=(bal[r.leaveTypeId]!=null)?bal[r.leaveTypeId]:(t?t.balance:0);
+      bal[r.leaveTypeId]=cur+r.days;
+      await updateDoc(uref,{balances:bal});
+    }
+  }
+  await updateDoc(doc(db,'requests',r.id),{status:'rejected',rejectReason:reason,reviewedBy:ME.name,reviewedAt:serverTimestamp()});
+  await logAction('إلغاء موافقة',`${r.type==='permission'?'استئذان':'إجازة'} — ${r.employeeName} — ${reason}`);
+  toast('تم إلغاء الموافقة'+((r.type==='leave'&&r.deduct)?' وإعادة الرصيد':''),'ok');
 }
 async function withdraw(r){
   if(!confirm('إلغاء هذا الطلب؟ سيظل ظاهراً في سجلك بحالة «ملغي».'))return;
