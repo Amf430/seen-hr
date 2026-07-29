@@ -1116,7 +1116,8 @@ function pageMonthly(v){
     const head=el('div','');head.style.cssText='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px';
     head.appendChild(el('h3','',`تفاصيل الدورة — ${cyc.label}`));
     const exp=el('button','btn sm','⬇️ تصدير Excel');exp.onclick=()=>monthlyExport(cyc);
-    head.appendChild(exp);card.appendChild(head);
+    const clr=el('button','btn sm danger','🗑️ مسح بيانات الدورة');clr.onclick=()=>clearCycle(cyc,list);
+    head.appendChild(exp);head.appendChild(clr);card.appendChild(head);
 
     if(!list.length) card.appendChild(el('div','empty','<div class="big">📭</div>لا توجد طلبات في هذه الدورة'));
     else{
@@ -1136,6 +1137,16 @@ function pageMonthly(v){
   dd.onchange=draw;draw();
 }
 
+async function clearCycle(cyc,list){
+  if(!list.length){toast('لا توجد بيانات لمسحها في هذه الدورة','err');return;}
+  if(!confirm(`سيتم حذف ${list.length} طلب نهائياً من دورة «${cyc.label}» ولا يمكن التراجع عن هذا الإجراء. متابعة؟`))return;
+  if(!confirm('تأكيد أخير: هذا حذف نهائي لكل طلبات هذي الدورة (استئذانات وإجازات). متأكد؟'))return;
+  try{
+    for(const r of list){ await deleteDoc(doc(db,'requests',r.id)); }
+    await logAction('مسح بيانات دورة',cyc.label+' — '+list.length+' طلب');
+    toast('تم مسح بيانات الدورة وتصفير العداد','ok');
+  }catch(e){console.error(e);toast('تعذّر إكمال المسح لكل الطلبات','err');}
+}
 function monthlyExport(cyc){
   const list=requestsInCycle(cyc);
   if(!list.length){toast('لا توجد طلبات في هذه الدورة','err');return;}
