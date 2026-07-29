@@ -888,9 +888,10 @@ function pageEmployees(v){
         <td>${u.role==='admin'?'<span class="tag">مدير</span>':'موظف'}</td>`;
       const act=el('td','');const cell=el('div','actions-cell');
       const edit=el('button','btn sm ghost','تعديل');edit.onclick=()=>openEmpForm(u);
+      const restore=el('button','btn sm ghost','استعادة الوصول');restore.onclick=()=>openRestoreAccess(u);
       const susp=el('button','btn sm ghost',u.status==='active'?'تعليق':'تفعيل');
       susp.onclick=()=>toggleSuspend(u);
-      cell.append(edit,susp);
+      cell.append(edit,restore,susp);
       if(u.id!==ME.id){const del=el('button','btn sm danger','حذف');del.onclick=()=>deleteEmp(u);cell.appendChild(del);}
       act.appendChild(cell);tr.appendChild(act);body.appendChild(tr);
     });
@@ -975,6 +976,53 @@ async function deleteEmp(u){
   if(!confirm(`حذف بيانات ${u.name}؟\nملاحظة: يُحذف ملفه من النظام، لكن حساب الدخول يجب حذفه من Firebase Authentication يدوياً.`))return;
   try{await deleteDoc(doc(db,'users',u.id));await logAction('حذف موظف',u.name);await refreshUsers();render();toast('تم حذف الملف');}
   catch(e){console.error(e);toast('تعذّر الحذف','err');}
+}
+
+/* ---------- استعادة الوصول (كلمة مرور افتراضية 123456) ---------- */
+function openRestoreAccess(u){
+  const ov=el('div','overlay');
+  const m=el('div','modal',`<h3>استعادة الوصول — ${esc(u.name)}</h3>
+    <div class="help">
+      الخطوة ١: روح لـ Firebase → Authentication → Users، دوّر عن حساب هذا الموظف (بريده الداخلي <b>${esc(u.email||'')}</b>) واحذفه من هناك.<br><br>
+      الخطوة ٢: بعد ما تحذفه من Firebase، اضغط الزر تحت — بينشئ حساب دخول جديد بنفس رقم الجوال وكلمة مرور مبدئية <b>123456</b>، وينقل كل بيانات الموظف وسجل طلباته للحساب الجديد تلقائياً بدون ما يضيع شي.
+    </div>
+    <div class="err" id="raErr"></div>
+    <div class="row"><button class="btn ghost" id="raCancel">إلغاء</button><button class="btn" id="raOk">تم الحذف — إنشاء حساب جديد</button></div>`);
+  ov.appendChild(m);document.body.appendChild(ov);
+  m.querySelector('#raCancel').onclick=()=>ov.remove();
+  ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  m.querySelector('#raOk').onclick=async()=>{
+    const btn=m.querySelector('#raOk');btn.disabled=true;btn.textContent='جارٍ الاستعادة…';
+    try{ await restoreAccess(u); ov.remove(); }
+    catch(e){
+      console.error(e);
+      const map={'auth/email-already-in-use':'الحساب لسه موجود في Authentication — تأكد إنك حذفته أولاً'};
+      m.querySelector('#raErr').textContent=map[e.code]||'تعذّرت الاستعادة';
+      btn.disabled=false;btn.textContent='تم الحذف — إنشاء حساب جديد';
+    }
+  };
+}
+async function restoreAccess(u){
+  const phoneDigits=(u.phone||'').replace(/[^0-9]/g,'');
+  const email=phoneDigits?phoneDigits+'@seen-hr.local':u.email;
+  const oldUid=u.id;
+  // إنشاء حساب جديد عبر تطبيق ثانوي حتى لا يُسجّل خروج الأدمن
+  const secondary=initializeApp(firebaseConfig,'secondary_'+Date.now());
+  const secAuth=getAuth(secondary);
+  const cred=await createUserWithEmailAndPassword(secAuth,email,'123456');
+  const newUid=cred.user.uid;
+  await signOut(secAuth);
+  // نسخ بيانات الموظف كاملة لملف جديد مرتبط بالحساب الجديد
+  const {id,...data}=u;
+  await setDoc(doc(db,'users',newUid),{...data,email,mustChangePassword:true});
+  // نقل كل طلباته القديمة للحساب الجديد حتى لا تضيع
+  const snap=await getDocs(query(collection(db,'requests'),where('employeeUid','==',oldUid)));
+  for(const d of snap.docs){ await updateDoc(doc(db,'requests',d.id),{employeeUid:newUid}); }
+  // حذف الملف القديم بعد اكتمال النقل
+  await deleteDoc(doc(db,'users',oldUid));
+  await logAction('استعادة وصول موظف',u.name+' — كلمة مرور افتراضية 123456');
+  await refreshUsers(); render();
+  toast('تم إنشاء حساب جديد بكلمة مرور 123456 ونُقلت كل بياناته','ok');
 }
 
 /* ---------- الأدمن: القوائم ---------- */
