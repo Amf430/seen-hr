@@ -32,7 +32,7 @@ input,select,textarea{font-family:inherit;font-size:15px}
 .hidden{display:none!important}
 
 /* ---------- Login ---------- */
-#loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+#loginScreen,#pwScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
   background:radial-gradient(1200px 600px at 80% -10%,#6e2222 0%,var(--maroon) 45%,#3f1010 100%)}
 .login-card{background:var(--card);border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:100%;max-width:410px;padding:40px 34px;text-align:center}
 .brand-mark{width:64px;height:64px;border-radius:16px;background:var(--maroon);color:#fff;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;margin:0 auto 16px}
@@ -118,6 +118,7 @@ tr:hover td{background:#fdfbf9}
 .pill.approved{background:var(--green-bg);color:var(--green)}.pill.approved::before{background:var(--green)}
 .pill.rejected{background:var(--red-bg);color:var(--red)}.pill.rejected::before{background:var(--red)}
 .pill.pending{background:var(--amber-bg);color:var(--amber)}.pill.pending::before{background:var(--amber)}
+.pill.cancelled{background:#eeecea;color:var(--muted)}.pill.cancelled::before{background:var(--muted)}
 .pill.active{background:var(--green-bg);color:var(--green)}.pill.active::before{background:var(--green)}
 .pill.suspended{background:#f0eeec;color:var(--muted)}.pill.suspended::before{background:var(--muted)}
 .tag{display:inline-block;background:var(--maroon-tint);color:var(--maroon);padding:3px 10px;border-radius:8px;font-size:12px;font-weight:600}
@@ -196,6 +197,25 @@ tr:hover td{background:#fdfbf9}
   </div>
 </div>
 
+<!-- ============ FIRST-LOGIN PASSWORD CHANGE ============ -->
+<div id="pwScreen" class="hidden">
+  <div class="login-card">
+    <div class="brand-mark">س</div>
+    <h1>تعيين كلمة مرور جديدة</h1>
+    <p class="sub">لأول مرة، الرجاء تغيير كلمة المرور المبدئية قبل المتابعة</p>
+    <div class="field">
+      <label>كلمة المرور الجديدة</label>
+      <input id="pwNew" type="password" placeholder="6 أحرف على الأقل" autocomplete="new-password" />
+    </div>
+    <div class="field">
+      <label>تأكيد كلمة المرور</label>
+      <input id="pwConfirm" type="password" placeholder="أعد كتابتها" autocomplete="new-password" />
+    </div>
+    <button class="btn" id="pwSaveBtn">حفظ ومتابعة</button>
+    <div class="err" id="pwErr"></div>
+  </div>
+</div>
+
 <!-- ============ APP ============ -->
 <div id="app" class="hidden">
   <aside class="sidebar" id="sidebar">
@@ -230,7 +250,7 @@ tr:hover td{background:#fdfbf9}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  sendPasswordResetEmail, createUserWithEmailAndPassword
+  sendPasswordResetEmail, createUserWithEmailAndPassword, updatePassword
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
@@ -246,10 +266,12 @@ const firebaseConfig = {
   projectId:         "seen-hr-6c5f8",
   storageBucket:     "seen-hr-6c5f8.firebasestorage.app",
   messagingSenderId: "460068787",
-  appId:             "1:460068787:web:21bb8719d0307d79d39dc6"
+  appId:             "1:460068787:web:21bb8719d0307d79d39dc6",
+  measurementId:     "G-KFCV82CTTE"
 };
 
-/* بريد المدير (الأدمن) — أول تسجيل دخول بهذا البريد يُنشئ حساب الأدمن تلقائياً */
+/* بريد المدير (الأدمن) — أول تسجيل دخول بهذا البريد يُنشئ حساب الأدمن تلقائياً.
+   ⚠️ غيّره لبريدك ثم أنشئ نفس البريد في Firebase → Authentication → Add user */
 const ADMIN_EMAIL = "alaahoms43@gmail.com";
 /* ======================================================================== */
 
@@ -274,7 +296,11 @@ function toast(msg,type=''){const t=$('#toast');t.textContent=msg;t.className='s
 function fmtDate(d){if(!d)return'—';const x=new Date(d);return x.toLocaleDateString('ar-SA-u-ca-gregory',{year:'numeric',month:'2-digit',day:'2-digit'});}
 function fmtDT(ts){if(!ts)return'—';const d=ts.toDate?ts.toDate():new Date(ts);return d.toLocaleString('ar-SA-u-ca-gregory',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function daysBetween(a,b){const d=(new Date(b)-new Date(a))/86400000;return Math.max(1,Math.round(d)+1);}
-const STATUS_AR = {pending:'تحت المراجعة',approved:'تمت الموافقة',rejected:'مرفوض'};
+const STATUS_AR = {pending:'تحت المراجعة',approved:'تمت الموافقة',rejected:'مرفوض',cancelled:'ملغي'};
+function sortByCreated(arr){return arr.sort((a,b)=>{
+  const ta=a.createdAt&&a.createdAt.toMillis?a.createdAt.toMillis():Date.now();
+  const tb=b.createdAt&&b.createdAt.toMillis?b.createdAt.toMillis():Date.now();
+  return tb-ta;});}
 
 /* ========================================================================
    المصادقة
@@ -319,6 +345,7 @@ onAuthStateChanged(auth, async (user)=>{
       $('#loginErr').textContent='هذا الحساب معلّق. راجع الموارد البشرية.';
       showLogin(); return;
     }
+    if(ME.mustChangePassword){ showPwScreen(); return; }
     await loadSettings();
     enterApp();
   }catch(e){
@@ -328,7 +355,30 @@ onAuthStateChanged(auth, async (user)=>{
   }
 });
 
-function showLogin(){ $('#app').classList.add('hidden'); $('#loginScreen').classList.remove('hidden'); }
+function showLogin(){ $('#app').classList.add('hidden'); $('#pwScreen').classList.add('hidden'); $('#loginScreen').classList.remove('hidden'); }
+function showPwScreen(){ $('#app').classList.add('hidden'); $('#loginScreen').classList.add('hidden'); $('#pwScreen').classList.remove('hidden'); }
+
+$('#pwSaveBtn').onclick = async ()=>{
+  const np=$('#pwNew').value, cf=$('#pwConfirm').value, err=$('#pwErr'); err.textContent='';
+  if(np.length<6){err.textContent='كلمة المرور 6 أحرف على الأقل';return;}
+  if(np!==cf){err.textContent='كلمتا المرور غير متطابقتين';return;}
+  const btn=$('#pwSaveBtn'); btn.disabled=true; btn.textContent='جارٍ الحفظ…';
+  try{
+    await updatePassword(auth.currentUser, np);
+    await updateDoc(doc(db,'users',ME.id),{mustChangePassword:false});
+    ME.mustChangePassword=false;
+    $('#pwNew').value=''; $('#pwConfirm').value='';
+    await loadSettings();
+    toast('تم تعيين كلمة المرور','ok');
+    enterApp();
+  }catch(e){
+    console.error(e);
+    err.textContent = e.code==='auth/requires-recent-login'
+      ? 'انتهت الجلسة، سجّل الدخول من جديد ثم أعد المحاولة'
+      : 'تعذّر تغيير كلمة المرور';
+  }
+  btn.disabled=false; btn.textContent='حفظ ومتابعة';
+};
 
 async function loadMe(user){
   const ref=doc(db,'users',user.uid);
@@ -394,6 +444,7 @@ const NAV = {
 
 function enterApp(){
   $('#loginScreen').classList.add('hidden');
+  $('#pwScreen').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#sideName').textContent=ME.name;
   $('#sideRole').textContent = ME.role==='admin' ? 'مدير النظام' : (ME.jobTitle||'موظف');
@@ -423,18 +474,18 @@ function go(page){
 function subscribeData(){
   if(unsubReqs) unsubReqs();
   if(ME.role==='admin'){
-    const q1=query(collection(db,'requests'),orderBy('createdAt','desc'));
+    const q1=query(collection(db,'requests'));
     unsubReqs=onSnapshot(q1,snap=>{
-      CACHE_REQUESTS=snap.docs.map(d=>({id:d.id,...d.data()}));
+      CACHE_REQUESTS=sortByCreated(snap.docs.map(d=>({id:d.id,...d.data()})));
       updateBadges(); if(['home','inbox','reports','audit'].includes(currentPage)) render();
-    });
+    },err=>console.error('reqs',err));
     getDocs(query(collection(db,'users'))).then(s=>{CACHE_USERS=s.docs.map(d=>({id:d.id,...d.data()}));});
   }else{
-    const q1=query(collection(db,'requests'),where('employeeUid','==',ME.id),orderBy('createdAt','desc'));
+    const q1=query(collection(db,'requests'),where('employeeUid','==',ME.id));
     unsubReqs=onSnapshot(q1,snap=>{
-      CACHE_REQUESTS=snap.docs.map(d=>({id:d.id,...d.data()}));
+      CACHE_REQUESTS=sortByCreated(snap.docs.map(d=>({id:d.id,...d.data()})));
       updateBadges(); if(['home','mine'].includes(currentPage)) render();
-    });
+    },err=>console.error('reqs',err));
   }
 }
 function updateBadges(){
@@ -506,7 +557,7 @@ function requestCard(r,forAdmin){
     bar.append(ok,no); c.appendChild(bar);
   }
   if(!forAdmin && r.status==='pending'){
-    const cancel=el('button','btn sm ghost','سحب الطلب'); cancel.onclick=()=>withdraw(r);
+    const cancel=el('button','btn sm ghost','إلغاء الطلب'); cancel.onclick=()=>withdraw(r);
     bar.append(cancel); c.appendChild(bar);
   }
   return c;
@@ -651,7 +702,8 @@ function pageMine(v){
   const filt=el('div','filters');
   filt.innerHTML=`<div class="field"><label>الحالة</label><select id="fStatus">
     <option value="">الكل</option><option value="pending">تحت المراجعة</option>
-    <option value="approved">تمت الموافقة</option><option value="rejected">مرفوض</option></select></div>
+    <option value="approved">تمت الموافقة</option><option value="rejected">مرفوض</option>
+    <option value="cancelled">ملغي</option></select></div>
     <div class="field"><label>النوع</label><select id="fType"><option value="">الكل</option>
     <option value="permission">استئذان</option><option value="leave">إجازة</option></select></div>`;
   v.appendChild(filt);
@@ -688,7 +740,8 @@ function pageInbox(v){
   filt.innerHTML=`
     <div class="field"><label>الحالة</label><select id="fStatus">
       <option value="pending">تحت المراجعة</option><option value="">الكل</option>
-      <option value="approved">موافق عليها</option><option value="rejected">مرفوضة</option></select></div>
+      <option value="approved">موافق عليها</option><option value="rejected">مرفوضة</option>
+      <option value="cancelled">ملغية</option></select></div>
     <div class="field"><label>النوع</label><select id="fType"><option value="">الكل</option>
       <option value="permission">استئذان</option><option value="leave">إجازة</option></select></div>
     <div class="field" style="flex:1"><label>بحث بالاسم</label><input id="fSearch" placeholder="اسم الموظف…"></div>`;
@@ -743,9 +796,9 @@ function openReject(r){
   };
 }
 async function withdraw(r){
-  if(!confirm('سحب هذا الطلب نهائياً؟'))return;
-  try{await deleteDoc(doc(db,'requests',r.id));toast('تم سحب الطلب');}
-  catch(e){console.error(e);toast('تعذّر السحب','err');}
+  if(!confirm('إلغاء هذا الطلب؟ سيظل ظاهراً في سجلك بحالة «ملغي».'))return;
+  try{await updateDoc(doc(db,'requests',r.id),{status:'cancelled',reviewedAt:serverTimestamp()});toast('تم إلغاء الطلب');}
+  catch(e){console.error(e);toast('تعذّر الإلغاء','err');}
 }
 
 /* ---------- الأدمن: الموظفون ---------- */
@@ -838,7 +891,7 @@ function openEmpForm(u=null){
         const newUid=cred.user.uid;
         await signOut(secAuth);
         const balances={};SETTINGS.leaveTypes.forEach(t=>{if(t.deduct)balances[t.id]=t.balance;});
-        await setDoc(doc(db,'users',newUid),{...base,email,status:'active',balances,createdAt:serverTimestamp()});
+        await setDoc(doc(db,'users',newUid),{...base,email,status:'active',balances,mustChangePassword:true,createdAt:serverTimestamp()});
         await logAction('إضافة موظف',name+' ('+email+')');
         toast('تم إنشاء الحساب','ok');
       }
